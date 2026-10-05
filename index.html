@@ -1,0 +1,1127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WordTiles</title>
+<meta name="description" content="A crossword tile game in the browser. Play against the computer or friends.">
+<style>
+  :root {
+    --bg: #f3eee4;
+    --panel: #fffdf8;
+    --ink: #2b2620;
+    --muted: #7a7064;
+    --line: #e2d9c8;
+    --accent: #1f6f5c;
+    --accent-ink: #ffffff;
+    --frame: #1f6f5c;
+    --cell: #e8e1cc;
+    --cell-ink: #8a826f;
+    --tw: #d6544c;
+    --dw: #f0a9a1;
+    --tl: #3a7bd5;
+    --dl: #a7cbef;
+    --tile-a: #f8e7bf;
+    --tile-b: #ecd197;
+    --tile-ink: #3a2a14;
+    --tile-edge: #c9a866;
+    --pending: #fff3c4;
+    --last: #ffd86b;
+    --bad: #c0392b;
+    --good: #1f8a4c;
+    --shadow: 0 1px 2px rgba(0,0,0,.08), 0 6px 20px rgba(0,0,0,.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #191816;
+      --panel: #24221e;
+      --ink: #ece6da;
+      --muted: #a69d8f;
+      --line: #3a362f;
+      --accent: #3fa98c;
+      --accent-ink: #0f1d19;
+      --frame: #12463a;
+      --cell: #2c3632;
+      --cell-ink: #9aa69f;
+      --tw: #b8463f;
+      --dw: #a8706a;
+      --tl: #2f62a8;
+      --dl: #4c6f91;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 6px 20px rgba(0,0,0,.3);
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    min-height: 100vh;
+  }
+  button { font: inherit; cursor: pointer; }
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    max-width: 1100px; margin: 0 auto; padding: 12px 16px;
+  }
+  header h1 { font-size: 1.35rem; margin: 0; letter-spacing: .02em; display: flex; align-items: center; gap: 8px; }
+  header h1 .logo { display: inline-flex; gap: 2px; }
+  header h1 .logo span {
+    width: 22px; height: 22px; border-radius: 4px; display: grid; place-items: center;
+    background: linear-gradient(var(--tile-a), var(--tile-b)); color: var(--tile-ink);
+    font-size: .8rem; font-weight: 800; box-shadow: inset 0 -2px 0 var(--tile-edge);
+  }
+  .hbtns { display: flex; gap: 8px; }
+  .hbtns .btn { white-space: nowrap; }
+  @media (max-width: 480px) { header h1 { font-size: 1.1rem; } header h1 .logo { display: none; } }
+  .btn {
+    border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+    padding: 8px 14px; border-radius: 8px; font-weight: 600; font-size: .92rem;
+  }
+  .btn:hover:not(:disabled) { border-color: var(--accent); }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+  .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .btn.small { padding: 5px 10px; font-size: .85rem; }
+
+  .app {
+    max-width: 1100px; margin: 0 auto; padding: 0 16px 24px;
+    display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 20px; align-items: start;
+  }
+  @media (max-width: 860px) { .app { grid-template-columns: minmax(0, 1fr); } }
+
+  .play { min-width: 0; }
+  .board-wrap { container-type: inline-size; width: 100%; max-width: min(680px, calc(100vh - 300px)); min-width: 280px; margin: 0 auto; }
+  @media (max-width: 860px) { .board-wrap { max-width: 680px; min-width: 0; } }
+  .board {
+    display: grid; grid-template-columns: repeat(15, 1fr); gap: 2px;
+    background: var(--frame); padding: 5px; border-radius: 10px; box-shadow: var(--shadow);
+    user-select: none; -webkit-user-select: none;
+  }
+  .cell {
+    aspect-ratio: 1; background: var(--cell); border-radius: 3px;
+    display: grid; place-items: center; position: relative; overflow: hidden;
+    font-size: calc(100cqw / 15 * 0.26); font-weight: 700; color: var(--cell-ink);
+    line-height: 1; text-align: center;
+  }
+  .cell.TW { background: var(--tw); color: #fff; }
+  .cell.DW { background: var(--dw); color: #6b2a24; }
+  .cell.TL { background: var(--tl); color: #fff; }
+  .cell.DL { background: var(--dl); color: #1e4870; }
+  @media (prefers-color-scheme: dark) { .cell.DW { color: #fbe3df; } .cell.DL { color: #e1eefa; } }
+  .cell.star::after { content: "★"; font-size: calc(100cqw / 15 * 0.55); color: #6b2a24; }
+  .cell.hover { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .cell .cursor {
+    position: absolute; inset: 0; display: grid; place-items: center;
+    background: rgba(31,111,92,.25); color: var(--accent); font-size: calc(100cqw / 15 * 0.5);
+    border: 2px solid var(--accent); border-radius: 3px;
+  }
+
+  .tile {
+    position: relative; width: 100%; height: 100%; border-radius: 4px;
+    background: linear-gradient(var(--tile-a), var(--tile-b));
+    color: var(--tile-ink); display: grid; place-items: center;
+    box-shadow: inset 0 -2px 0 var(--tile-edge), 0 1px 1px rgba(0,0,0,.25);
+    touch-action: none; user-select: none; -webkit-user-select: none;
+  }
+  .tile .l { font-weight: 800; font-size: 0.6em; }
+  .tile .v { position: absolute; right: 8%; bottom: 6%; font-size: 0.25em; font-weight: 700; }
+  .tile.blank .l { color: #b0452f; }
+  .cell .tile { font-size: calc(100cqw / 15); }
+  .cell .tile.pending { background: linear-gradient(var(--pending), #f5dd8c); outline: 2px solid var(--accent); outline-offset: -2px; cursor: grab; }
+  .cell .tile.last { box-shadow: inset 0 -2px 0 var(--tile-edge), 0 0 0 2px var(--last); }
+  .tile.dragging { opacity: .3; }
+  .tile.ghost { position: fixed; z-index: 1000; pointer-events: none; transform: scale(1.12); box-shadow: 0 8px 20px rgba(0,0,0,.35); }
+
+  .status { text-align: center; margin: 12px 0 6px; font-weight: 600; min-height: 1.4em; }
+  .status .think { display: inline-block; animation: pulse 1s infinite; }
+  @keyframes pulse { 50% { opacity: .35; } }
+
+  .rack-row { display: flex; justify-content: center; }
+  #rack {
+    display: flex; gap: 6px; padding: 8px; min-height: 72px; width: min(100%, 440px); max-width: 100%;
+    background: #8b6a3e; border-radius: 10px; justify-content: center; align-items: center;
+    box-shadow: inset 0 -4px 0 #6b5030, var(--shadow);
+  }
+  #rack .tile { --t: min(calc((100vw - 84px) / 7), 54px); width: var(--t); height: var(--t); font-size: var(--t); cursor: grab; flex: none; }
+  #rack .tile.selected { transform: translateY(-6px); outline: 3px solid var(--accent); }
+  #rack .hidden-note { color: #f3e3c3; font-size: .9rem; }
+
+  .preview { text-align: center; min-height: 1.5em; margin: 10px 0 4px; font-size: .95rem; }
+  .preview .ok { color: var(--good); font-weight: 700; }
+  .preview .bad { color: var(--bad); font-weight: 700; }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 6px; }
+  .controls .btn.primary { min-width: 100px; }
+  .hint { text-align: center; color: var(--muted); font-size: .8rem; margin-top: 10px; }
+
+  aside { display: flex; flex-direction: column; gap: 14px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; box-shadow: var(--shadow); }
+  .card h2 { font-size: .8rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 10px; }
+  .players { display: flex; flex-direction: column; gap: 6px; }
+  .pl { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; border-radius: 8px; border: 2px solid transparent; }
+  .pl.turn { border-color: var(--accent); background: rgba(63,169,140,.08); }
+  .pl .nm { font-weight: 700; }
+  .pl .sub { font-size: .78rem; color: var(--muted); }
+  .pl .sc { font-size: 1.4rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .bag { display: flex; justify-content: space-between; margin-top: 10px; font-size: .88rem; color: var(--muted); }
+  .log { max-height: 240px; overflow-y: auto; font-size: .88rem; display: flex; flex-direction: column; gap: 4px; }
+  .log div { display: flex; justify-content: space-between; gap: 8px; padding: 3px 0; border-bottom: 1px dashed var(--line); }
+  .log .w { font-weight: 700; letter-spacing: .03em; }
+  .log .empty { color: var(--muted); border: none; }
+  .checker { display: flex; gap: 6px; }
+  .checker input {
+    flex: 1; min-width: 0; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--bg); color: var(--ink); font: inherit; text-transform: uppercase;
+  }
+  .checker-out { font-size: .88rem; margin-top: 8px; min-height: 1.2em; }
+
+  .modal-bg { position: fixed; inset: 0; background: rgba(20,16,10,.55); display: none; place-items: center; z-index: 500; padding: 16px; }
+  .modal-bg.open { display: grid; }
+  .modal-bg.solid { background: var(--bg); }
+  .modal { background: var(--panel); color: var(--ink); border-radius: 14px; padding: 22px; width: min(460px, 100%); max-height: calc(100vh - 32px); overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,.35); }
+  .modal h3 { margin: 0 0 12px; font-size: 1.2rem; }
+  .modal p { line-height: 1.5; margin: 0 0 10px; }
+  .modal ul { padding-left: 20px; line-height: 1.5; margin: 0 0 10px; }
+  .modal .mbtns { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; flex-wrap: wrap; }
+  .letters { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+  .letters button { aspect-ratio: 1; border: none; border-radius: 6px; font-weight: 800; font-size: 1.1rem; background: linear-gradient(var(--tile-a), var(--tile-b)); color: var(--tile-ink); box-shadow: inset 0 -2px 0 var(--tile-edge); }
+  .xrack { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
+  .xrack .tile { width: 48px; height: 48px; font-size: 48px; cursor: pointer; }
+  .xrack .tile.sel { outline: 3px solid var(--bad); transform: translateY(-4px); }
+  .prow { display: grid; grid-template-columns: 1fr 150px 34px; gap: 6px; margin-bottom: 8px; }
+  .prow input, .prow select { padding: 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); font: inherit; min-width: 0; }
+  .prow button { border: 1px solid var(--line); background: var(--bg); color: var(--ink); border-radius: 8px; }
+  .notice { font-size: .85rem; padding: 8px 10px; border-radius: 8px; background: rgba(192,57,43,.1); color: var(--bad); margin-bottom: 10px; }
+  .loading { font-size: .85rem; color: var(--muted); margin-bottom: 10px; }
+  .final { width: 100%; border-collapse: collapse; margin: 6px 0; }
+  .final td { padding: 6px 4px; border-bottom: 1px solid var(--line); }
+  .final td:last-child { text-align: right; font-weight: 800; font-variant-numeric: tabular-nums; }
+
+  .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(20px); background: #2b2620; color: #fff; padding: 10px 16px; border-radius: 10px; opacity: 0; transition: .25s; z-index: 900; max-width: calc(100vw - 32px); text-align: center; pointer-events: none; }
+  .toast.show { opacity: 1; transform: translateX(-50%); }
+</style>
+</head>
+<body>
+<header>
+  <h1><span class="logo"><span>W</span><span>T</span></span>WordTiles</h1>
+  <div class="hbtns">
+    <button class="btn small" id="helpBtn">How to play</button>
+    <button class="btn small" id="newBtn">New game</button>
+  </div>
+</header>
+
+<main class="app">
+  <section class="play">
+    <div class="board-wrap"><div class="board" id="board"></div></div>
+    <div class="status" id="status"></div>
+    <div class="rack-row"><div id="rack"></div></div>
+    <div class="preview" id="preview"></div>
+    <div class="controls">
+      <button class="btn" id="shuffleBtn">Shuffle</button>
+      <button class="btn" id="recallBtn">Recall</button>
+      <button class="btn" id="exchangeBtn">Exchange</button>
+      <button class="btn" id="passBtn">Pass</button>
+      <button class="btn primary" id="playBtn">Play</button>
+    </div>
+    <div class="hint">Drag tiles to the board, or tap a tile then a square. On a keyboard: click a square and type. Enter plays, Esc recalls.</div>
+  </section>
+
+  <aside>
+    <div class="card">
+      <h2>Scores</h2>
+      <div class="players" id="players"></div>
+      <div class="bag"><span>Tiles in bag</span><strong id="bagCount">0</strong></div>
+    </div>
+    <div class="card">
+      <h2>Moves</h2>
+      <div class="log" id="log"></div>
+    </div>
+    <div class="card">
+      <h2>Word checker</h2>
+      <form class="checker" id="checker">
+        <input id="checkInput" maxlength="15" placeholder="Type a word" autocomplete="off" spellcheck="false">
+        <button class="btn small" type="submit">Check</button>
+      </form>
+      <div class="checker-out" id="checkOut"></div>
+    </div>
+  </aside>
+</main>
+
+<div class="modal-bg" id="modalBg"><div class="modal" id="modal"></div></div>
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+/* ============================================================
+   Constants
+   ============================================================ */
+const N = 15, CENTER = 7, RACK_SIZE = 7, BINGO = 50;
+const VAL = {A:1,B:3,C:3,D:2,E:1,F:4,G:2,H:4,I:1,J:8,K:5,L:1,M:3,N:1,O:1,P:3,Q:10,R:1,S:1,T:1,U:1,V:4,W:4,X:8,Y:4,Z:10,'?':0};
+const DIST = {A:9,B:2,C:2,D:4,E:12,F:2,G:3,H:2,I:9,J:1,K:1,L:4,M:2,N:6,O:8,P:2,Q:1,R:6,S:4,T:6,U:4,V:2,W:2,X:1,Y:2,Z:1,'?':2};
+const ALL = (1 << 26) - 1;
+const SAVE_KEY = 'wordtiles-save-v1';
+const TYPES = { human: 'Human', easy: 'Computer (Easy)', medium: 'Computer (Medium)', hard: 'Computer (Hard)' };
+
+// Premium squares, built from one quadrant by symmetry
+const PREM = Array.from({length: N}, () => Array(N).fill(''));
+function sym(list, t) {
+  for (const [r, c] of list)
+    for (const [a, b] of [[r, c], [c, r]])
+      for (const [x, y] of [[a, b], [a, 14 - b], [14 - a, b], [14 - a, 14 - b]]) PREM[x][y] = t;
+}
+sym([[0,3],[2,6],[3,7],[6,6],[6,2],[3,0],[7,3]], 'DL');
+sym([[1,5],[5,5],[5,1]], 'TL');
+sym([[1,1],[2,2],[3,3],[4,4],[7,7]], 'DW');
+sym([[0,0],[0,7]], 'TW');
+
+/* ============================================================
+   Dictionary (trie)
+   ============================================================ */
+function TNode() { this.k = null; this.t = false; }
+const ROOT = new TNode();
+let dictState = 'loading'; // loading | ok | failed
+function addWord(w) {
+  let n = ROOT;
+  for (let i = 0; i < w.length; i++) {
+    const ch = w[i];
+    if (!n.k) n.k = {};
+    n = n.k[ch] || (n.k[ch] = new TNode());
+  }
+  n.t = true;
+}
+function walk(n, s) {
+  for (let i = 0; n && i < s.length; i++) n = n.k ? n.k[s[i]] : undefined;
+  return n;
+}
+function isWord(w) {
+  if (dictState !== 'ok') return w.length >= 2;
+  const n = walk(ROOT, w);
+  return !!(n && n.t);
+}
+async function loadDictionary() {
+  try {
+    const res = await fetch('words.txt');
+    if (!res.ok) throw new Error(res.status);
+    const text = await res.text();
+    const words = text.split(/\r?\n/);
+    for (const w of words) if (w.length >= 2) addWord(w.trim().toUpperCase());
+    dictState = 'ok';
+  } catch (e) {
+    console.warn('Dictionary failed to load:', e);
+    dictState = 'failed';
+  }
+  if (onDictChange) onDictChange();
+}
+let onDictChange = null;
+
+/* ============================================================
+   State
+   ============================================================ */
+let S = null;               // game state
+let pending = new Map();    // tileId -> {r, c}
+let selectedId = null;
+let cursor = null;          // {r, c, dir:'A'|'D'}
+let typed = [];             // tile ids placed by keyboard (for backspace)
+let busy = false;           // computer thinking / modal gating
+let modalOpen = false;
+let awaitingHandoff = false;
+
+const $ = id => document.getElementById(id);
+const cur = () => S.players[S.turn];
+const humans = () => S.players.filter(p => p.type === 'human');
+const letterOf = t => t.ch === '?' ? t.as : t.ch;
+
+function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+
+function newGame(playerDefs) {
+  const bag = [];
+  let id = 1;
+  for (const ch in DIST) for (let i = 0; i < DIST[ch]; i++) bag.push({id: id++, ch, as: null});
+  shuffle(bag);
+  S = {
+    players: playerDefs.map(p => ({name: p.name, type: p.type, score: 0, rack: []})),
+    board: Array.from({length: N}, () => Array(N).fill(null)),
+    bag, turn: 0, log: [], scoreless: 0, last: [], over: false,
+  };
+  for (const p of S.players) draw(p);
+  resetTurnUI();
+  startTurn();
+}
+
+function draw(p) { while (p.rack.length < RACK_SIZE && S.bag.length) p.rack.push(S.bag.pop()); }
+function boardEmpty(b) { for (const row of b) for (const x of row) if (x) return false; return true; }
+function resetTurnUI() { pending.clear(); selectedId = null; cursor = null; typed = []; for (const p of S.players) for (const t of p.rack) if (t.ch === '?') t.as = null; }
+
+function saveGame() {
+  try {
+    if (!S || S.over) { localStorage.removeItem(SAVE_KEY); return; }
+    localStorage.setItem(SAVE_KEY, JSON.stringify(S));
+  } catch (e) {}
+}
+function loadSaved() {
+  try { const s = JSON.parse(localStorage.getItem(SAVE_KEY)); return s && !s.over && s.players ? s : null; } catch (e) { return null; }
+}
+
+/* ============================================================
+   Move evaluation (shared by humans and computer)
+   places: [{r, c, ch, blank}]
+   ============================================================ */
+function evalMove(places, board, isEmpty) {
+  if (!places.length) return {ok: false, err: 'Place some tiles first.'};
+  if (isEmpty === undefined) isEmpty = boardEmpty(board);
+  const map = new Map();
+  for (const p of places) map.set(p.r * N + p.c, p);
+  const at = (r, c) => (r < 0 || c < 0 || r >= N || c >= N) ? null : (map.get(r * N + c) || board[r][c]);
+
+  let sameRow = true, sameCol = true;
+  for (const p of places) { if (p.r !== places[0].r) sameRow = false; if (p.c !== places[0].c) sameCol = false; }
+  let dir;
+  if (sameRow && sameCol) { const p = places[0]; dir = (at(p.r, p.c - 1) || at(p.r, p.c + 1)) ? 'A' : 'D'; }
+  else if (sameRow) dir = 'A';
+  else if (sameCol) dir = 'D';
+  else return {ok: false, err: 'Tiles must be in a single row or column.'};
+  const dr = dir === 'D' ? 1 : 0, dc = dir === 'A' ? 1 : 0;
+
+  let f = places[0], l = places[0];
+  for (const p of places) {
+    if (p.r * dr + p.c * dc < f.r * dr + f.c * dc) f = p;
+    if (p.r * dr + p.c * dc > l.r * dr + l.c * dc) l = p;
+  }
+  for (let r = f.r, c = f.c; r <= l.r && c <= l.c; r += dr, c += dc)
+    if (!at(r, c)) return {ok: false, err: 'Tiles must form one connected word, with no gaps.'};
+
+  if (isEmpty) {
+    if (!map.has(CENTER * N + CENTER)) return {ok: false, err: 'The first word must cover the center star.'};
+    if (places.length < 2) return {ok: false, err: 'The first word must be at least 2 letters.'};
+  } else {
+    let touch = false;
+    for (const p of places) {
+      if ((p.r > 0 && board[p.r-1][p.c]) || (p.r < N-1 && board[p.r+1][p.c]) ||
+          (p.c > 0 && board[p.r][p.c-1]) || (p.c < N-1 && board[p.r][p.c+1])) { touch = true; break; }
+    }
+    if (!touch) return {ok: false, err: 'Your word must connect to tiles already on the board.'};
+  }
+
+  const readWord = (r, c, dr, dc) => {
+    while (at(r - dr, c - dc)) { r -= dr; c -= dc; }
+    let w = '', sum = 0, mult = 1;
+    for (let t; (t = at(r, c)); r += dr, c += dc) {
+      let v = t.blank ? 0 : VAL[t.ch];
+      if (map.has(r * N + c)) {
+        const pr = PREM[r][c];
+        if (pr === 'DL') v *= 2; else if (pr === 'TL') v *= 3;
+        else if (pr === 'DW') mult *= 2; else if (pr === 'TW') mult *= 3;
+      }
+      sum += v; w += t.ch;
+    }
+    return {word: w, score: sum * mult};
+  };
+
+  const words = [];
+  const main = readWord(f.r, f.c, dr, dc);
+  if (main.word.length >= 2) words.push(main);
+  for (const p of places) { const cw = readWord(p.r, p.c, dc, dr); if (cw.word.length >= 2) words.push(cw); }
+  if (!words.length) return {ok: false, err: 'Words must be at least 2 letters long.'};
+  let score = 0;
+  for (const w of words) score += w.score;
+  const bingo = places.length === RACK_SIZE;
+  if (bingo) score += BINGO;
+  return {ok: true, words, score, bingo, main: main.word.length >= 2 ? main.word : words[0].word};
+}
+
+/* ============================================================
+   Computer player: anchor-based move generation over the trie
+   ============================================================ */
+function rackCounts(rack) {
+  const cnt = new Array(27).fill(0);
+  for (const t of rack) cnt[t.ch === '?' ? 26 : t.ch.charCodeAt(0) - 65]++;
+  return cnt;
+}
+
+function generateMoves(board, rack) {
+  const isEmpty = boardEmpty(board);
+  const moves = [], seen = new Set();
+  const G = board.map(row => row.map(x => x ? x.ch : null));
+  const GT = G[0].map((_, c) => G.map(row => row[c]));
+  genDir(G, false);
+  genDir(GT, true);
+  return moves;
+
+  function genDir(G, transposed) {
+    const cc = [], anchor = [];
+    for (let r = 0; r < N; r++) {
+      cc.push(new Array(N).fill(0)); anchor.push(new Array(N).fill(false));
+      for (let c = 0; c < N; c++) {
+        if (G[r][c]) continue;
+        let up = '', down = '', k;
+        for (k = r - 1; k >= 0 && G[k][c]; k--) up = G[k][c] + up;
+        for (k = r + 1; k < N && G[k][c]; k++) down += G[k][c];
+        if (!up && !down) { cc[r][c] = ALL; }
+        else {
+          let m = 0; const node = walk(ROOT, up);
+          if (node && node.k) for (const L in node.k) { const n2 = walk(node.k[L], down); if (n2 && n2.t) m |= 1 << (L.charCodeAt(0) - 65); }
+          cc[r][c] = m;
+        }
+        if (isEmpty) anchor[r][c] = (r === CENTER && c === CENTER);
+        else anchor[r][c] = !!((r > 0 && G[r-1][c]) || (r < N-1 && G[r+1][c]) || (c > 0 && G[r][c-1]) || (c < N-1 && G[r][c+1]));
+      }
+    }
+
+    const record = (r, placed) => {
+      const places = placed.map(p => transposed ? {r: p.c, c: r, ch: p.ch, blank: p.blank} : {r, c: p.c, ch: p.ch, blank: p.blank});
+      const key = places.map(p => p.r + ',' + p.c + p.ch + (p.blank ? '*' : '')).sort().join('|');
+      if (seen.has(key)) return;
+      seen.add(key);
+      const res = evalMove(places, board, isEmpty);
+      if (res.ok) moves.push({places, score: res.score, words: res.words, main: res.main});
+    };
+
+    const extend = (r, col, node, placed, ac) => {
+      if (col < N && G[r][col]) {
+        const nx = node.k && node.k[G[r][col]];
+        if (nx) extend(r, col + 1, nx, placed, ac);
+        return;
+      }
+      if (node.t && placed.length && col > ac) record(r, placed);
+      if (col >= N || !node.k) return;
+      const m = cc[r][col];
+      for (const L in node.k) {
+        const i = L.charCodeAt(0) - 65;
+        if (!(m & (1 << i))) continue;
+        const nx = node.k[L];
+        if (rack[i] > 0) { rack[i]--; placed.push({c: col, ch: L, blank: false}); extend(r, col + 1, nx, placed, ac); placed.pop(); rack[i]++; }
+        if (rack[26] > 0) { rack[26]--; placed.push({c: col, ch: L, blank: true}); extend(r, col + 1, nx, placed, ac); placed.pop(); rack[26]++; }
+      }
+    };
+
+    const leftPart = (part, node, limit, r, ac) => {
+      extend(r, ac, node, part.map((p, i) => ({c: ac - part.length + i, ch: p.ch, blank: p.blank})), ac);
+      if (limit <= 0 || !node.k) return;
+      for (const L in node.k) {
+        const i = L.charCodeAt(0) - 65, nx = node.k[L];
+        if (rack[i] > 0) { rack[i]--; part.push({ch: L, blank: false}); leftPart(part, nx, limit - 1, r, ac); part.pop(); rack[i]++; }
+        if (rack[26] > 0) { rack[26]--; part.push({ch: L, blank: true}); leftPart(part, nx, limit - 1, r, ac); part.pop(); rack[26]++; }
+      }
+    };
+
+    for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+      if (!anchor[r][c]) continue;
+      if (c > 0 && G[r][c - 1]) {
+        let k = c - 1; while (k > 0 && G[r][k - 1]) k--;
+        let node = ROOT;
+        for (let j = k; j < c && node; j++) node = node.k ? node.k[G[r][j]] : undefined;
+        if (node) extend(r, c, node, [], c);
+      } else {
+        let limit = 0;
+        for (let k = c - 1; k >= 0 && !G[r][k] && !anchor[r][k]; k--) limit++;
+        leftPart([], ROOT, Math.min(limit, RACK_SIZE - 1), r, c);
+      }
+    }
+  }
+}
+
+function leaveValue(cnt) {
+  let v = 0, len = 0, vowels = 0;
+  for (let i = 0; i < 27; i++) len += cnt[i];
+  if (!len) return 0;
+  v += cnt[26] * 8;
+  if (cnt[18] > 0) v += 4 + (cnt[18] - 1);           // S
+  if (cnt[16] > 0 && cnt[20] === 0) v -= 7;          // Q without U
+  for (let i = 0; i < 26; i++) if (cnt[i] > 1) v -= (cnt[i] - 1) * 2.5;
+  for (const i of [0, 4, 8, 14, 20]) vowels += cnt[i];
+  v -= Math.abs(vowels - (len - cnt[26]) * 0.42) * 2;
+  return v;
+}
+
+function chooseComputerMove(p) {
+  const counts = rackCounts(p.rack);
+  const moves = generateMoves(S.board, counts.slice());
+  if (!moves.length) return null;
+  if (p.type === 'hard') {
+    let best = null, bestV = -Infinity;
+    for (const m of moves) {
+      const left = counts.slice();
+      for (const pl of m.places) left[pl.blank ? 26 : pl.ch.charCodeAt(0) - 65]--;
+      const v = m.score + (S.bag.length ? leaveValue(left) : 0);
+      if (v > bestV) { bestV = v; best = m; }
+    }
+    return best;
+  }
+  moves.sort((a, b) => b.score - a.score);
+  const n = moves.length;
+  const [lo, hi] = p.type === 'medium' ? [0.04, 0.3] : [0.35, 0.8];
+  const a = Math.floor(n * lo), b = Math.max(a, Math.floor(n * hi) - 1);
+  return moves[a + Math.floor(Math.random() * (b - a + 1))];
+}
+
+function computerTurn() {
+  const p = cur();
+  const move = chooseComputerMove(p);
+  if (move) {
+    const places = move.places.map(pl => {
+      const idx = p.rack.findIndex(t => pl.blank ? t.ch === '?' : t.ch === pl.ch);
+      const t = p.rack[idx];
+      if (pl.blank) t.as = pl.ch;
+      return {...pl, id: t.id};
+    });
+    commitPlay(p, places);
+  } else if (S.bag.length >= RACK_SIZE) {
+    const keep = new Set(['?', 'S', 'E', 'A', 'R']);
+    let ids = p.rack.filter(t => !keep.has(t.ch)).map(t => t.id);
+    if (!ids.length) ids = p.rack.map(t => t.id);
+    doExchange(p, ids);
+  } else {
+    doPass(p);
+  }
+}
+
+/* ============================================================
+   Turn flow
+   ============================================================ */
+function startTurn() {
+  busy = false;
+  render();
+  saveGame();
+  if (S.over) return;
+  const p = cur();
+  if (p.type !== 'human') {
+    busy = true;
+    render();
+    setTimeout(() => {
+      try { computerTurn(); } catch (e) { console.error(e); doPass(p); }
+    }, 450);
+  } else if (humans().length > 1) {
+    awaitingHandoff = true;
+    render();
+    openModal({
+      title: p.name === 'You' ? 'Your turn' : `${p.name}'s turn`,
+      body: `<p>Pass the device to <strong>${esc(p.name)}</strong>. Tiles stay hidden until you're ready.</p>`,
+      solid: true,
+      buttons: [{label: "I'm ready", primary: true, onClick: () => { awaitingHandoff = false; closeModal(); render(); }}],
+    });
+  }
+}
+
+function nextTurn() {
+  S.turn = (S.turn + 1) % S.players.length;
+  resetTurnUI();
+  startTurn();
+}
+
+function commitPlay(p, places) {
+  const res = evalMove(places, S.board);
+  S.last = [];
+  for (const pl of places) {
+    S.board[pl.r][pl.c] = {ch: pl.ch, blank: pl.blank};
+    S.last.push(pl.r * N + pl.c);
+    p.rack.splice(p.rack.findIndex(t => t.id === pl.id), 1);
+  }
+  p.score += res.score;
+  draw(p);
+  S.scoreless = 0;
+  S.log.unshift({who: p.name, word: res.main, extra: res.words.length - 1, pts: res.score, bingo: res.bingo});
+  if (!p.rack.length && !S.bag.length) return finishGame(p);
+  nextTurn();
+}
+
+function doExchange(p, ids) {
+  const out = p.rack.filter(t => ids.includes(t.id));
+  p.rack = p.rack.filter(t => !ids.includes(t.id));
+  for (const t of out) t.as = null;
+  draw(p);
+  S.bag.push(...out);
+  shuffle(S.bag);
+  S.scoreless++;
+  S.log.unshift({who: p.name, note: `exchanged ${out.length} tile${out.length > 1 ? 's' : ''}`});
+  S.last = [];
+  if (checkScoreless()) return;
+  nextTurn();
+}
+
+function doPass(p) {
+  S.scoreless++;
+  S.log.unshift({who: p.name, note: 'passed'});
+  if (checkScoreless()) return;
+  nextTurn();
+}
+
+function checkScoreless() {
+  if (S.scoreless >= Math.max(6, S.players.length * 3)) { finishGame(null); return true; }
+  return false;
+}
+
+function finishGame(outPlayer) {
+  resetTurnUI();
+  S.over = true;
+  let bonus = 0;
+  const lines = [];
+  for (const p of S.players) {
+    const rem = p.rack.reduce((s, t) => s + VAL[t.ch], 0);
+    p.score -= rem; bonus += rem;
+    if (rem) lines.push(`${esc(p.name)} −${rem} for tiles left`);
+  }
+  if (outPlayer && bonus) { outPlayer.score += bonus; lines.push(`${esc(outPlayer.name)} +${bonus} for going out first`); }
+  S.log.unshift({who: '—', note: outPlayer ? `${outPlayer.name} went out` : 'Game over (no more scoring)'});
+  busy = false;
+  render();
+  saveGame();
+  const ranked = S.players.slice().sort((a, b) => b.score - a.score);
+  const tie = ranked.length > 1 && ranked[0].score === ranked[1].score;
+  openModal({
+    title: tie ? "It's a tie!" : `${ranked[0].name} wins!`,
+    body: `<table class="final">${ranked.map(p => `<tr><td>${esc(p.name)}</td><td>${p.score}</td></tr>`).join('')}</table>
+           ${lines.length ? `<p style="font-size:.85rem;color:var(--muted)">${lines.join('<br>')}</p>` : ''}`,
+    buttons: [{label: 'View board', onClick: closeModal}, {label: 'New game', primary: true, onClick: showSetup}],
+  });
+}
+
+/* ============================================================
+   Human actions
+   ============================================================ */
+function viewer() {
+  if (!S || S.over) return null;
+  const p = cur();
+  if (p.type === 'human') return awaitingHandoff ? null : p;
+  const hs = humans();
+  return hs.length === 1 ? hs[0] : null;
+}
+function canAct() { return S && !S.over && !busy && !modalOpen && !awaitingHandoff && cur().type === 'human'; }
+function tileById(id) { return cur().rack.find(t => t.id === id); }
+function pendingAt(r, c) { for (const [id, pos] of pending) if (pos.r === r && pos.c === c) return id; return null; }
+function pendingPlaces() {
+  const out = [];
+  for (const [id, pos] of pending) { const t = tileById(id); out.push({r: pos.r, c: pos.c, ch: letterOf(t), blank: t.ch === '?', id}); }
+  return out;
+}
+
+function placeTile(id, r, c, letter) {
+  const t = tileById(id);
+  if (!t || S.board[r][c]) return;
+  const other = pendingAt(r, c);
+  if (other != null && other !== id) return;
+  selectedId = null;
+  if (t.ch === '?' && !t.as) {
+    if (letter) { t.as = letter; pending.set(id, {r, c}); render(); return; }
+    pickBlank(L => { t.as = L; pending.set(id, {r, c}); render(); });
+    return;
+  }
+  pending.set(id, {r, c});
+  render();
+}
+
+function returnToRack(id, index) {
+  const p = cur(), t = tileById(id);
+  if (!t) return;
+  pending.delete(id);
+  if (t.ch === '?') t.as = null;
+  if (index != null) {
+    const visible = p.rack.filter(x => !pending.has(x.id) && x.id !== id);
+    p.rack.splice(p.rack.indexOf(t), 1);
+    const before = visible[index];
+    p.rack.splice(before ? p.rack.indexOf(before) : p.rack.length, 0, t);
+  }
+}
+
+function recall() { pending.clear(); typed = []; for (const t of cur().rack) if (t.ch === '?') t.as = null; render(); }
+
+function humanPlay() {
+  if (!canAct()) return;
+  const places = pendingPlaces();
+  const res = evalMove(places, S.board);
+  if (!res.ok) return toast(res.err);
+  const bad = res.words.filter(w => !isWord(w.word)).map(w => w.word);
+  if (bad.length) return toast(`Not in the dictionary: ${bad.join(', ')}`);
+  commitPlay(cur(), places);
+}
+
+function humanPass() {
+  if (!canAct()) return;
+  openModal({
+    title: 'Pass your turn?', body: '<p>You will score nothing this turn.</p>',
+    buttons: [{label: 'Cancel', onClick: closeModal}, {label: 'Pass', primary: true, onClick: () => { closeModal(); recall(); doPass(cur()); }}],
+  });
+}
+
+function humanExchange() {
+  if (!canAct()) return;
+  if (S.bag.length < RACK_SIZE) return toast(`You can only exchange when the bag has at least ${RACK_SIZE} tiles.`);
+  recall();
+  const sel = new Set();
+  const wrap = document.createElement('div');
+  wrap.innerHTML = '<p>Choose tiles to swap. You will score nothing this turn.</p>';
+  const xr = document.createElement('div'); xr.className = 'xrack';
+  for (const t of cur().rack) {
+    const el = tileEl(t); el.onclick = () => { sel.has(t.id) ? sel.delete(t.id) : sel.add(t.id); el.classList.toggle('sel'); };
+    xr.appendChild(el);
+  }
+  wrap.appendChild(xr);
+  openModal({
+    title: 'Exchange tiles', body: wrap,
+    buttons: [{label: 'Cancel', onClick: closeModal}, {label: 'Exchange', primary: true, onClick: () => {
+      if (!sel.size) return toast('Select at least one tile.');
+      closeModal(); doExchange(cur(), [...sel]);
+    }}],
+  });
+}
+
+function pickBlank(cb) {
+  const wrap = document.createElement('div');
+  wrap.innerHTML = '<p>Choose a letter for your blank tile.</p>';
+  const g = document.createElement('div'); g.className = 'letters';
+  for (let i = 0; i < 26; i++) {
+    const L = String.fromCharCode(65 + i);
+    const b = document.createElement('button'); b.textContent = L;
+    b.onclick = () => { closeModal(); cb(L); };
+    g.appendChild(b);
+  }
+  wrap.appendChild(g);
+  openModal({title: 'Blank tile', body: wrap, buttons: [{label: 'Cancel', onClick: closeModal}]});
+}
+
+/* ---------- keyboard ---------- */
+function advanceCursor(step) {
+  if (!cursor) return;
+  const dr = cursor.dir === 'D' ? 1 : 0, dc = cursor.dir === 'A' ? 1 : 0;
+  let {r, c} = cursor;
+  if (step) { r += dr; c += dc; }
+  while (r < N && c < N && (S.board[r][c] || pendingAt(r, c) != null)) { r += dr; c += dc; }
+  cursor.r = r; cursor.c = c;
+}
+function typeLetter(L) {
+  if (!cursor) return;
+  advanceCursor(false);
+  if (cursor.r >= N || cursor.c >= N) return;
+  const rack = cur().rack.filter(t => !pending.has(t.id));
+  const t = rack.find(x => x.ch === L) || rack.find(x => x.ch === '?');
+  if (!t) return toast(`No ${L} on your rack.`);
+  if (t.ch === '?') t.as = L;
+  pending.set(t.id, {r: cursor.r, c: cursor.c});
+  typed.push(t.id);
+  advanceCursor(true);
+  render();
+}
+function backspace() {
+  while (typed.length && !pending.has(typed[typed.length - 1])) typed.pop();
+  const id = typed.pop();
+  if (id == null) return;
+  const pos = pending.get(id);
+  returnToRack(id);
+  if (cursor) { cursor.r = pos.r; cursor.c = pos.c; }
+  render();
+}
+document.addEventListener('keydown', e => {
+  if (modalOpen || e.target.closest('input, select, textarea')) return;
+  if (!canAct()) return;
+  const k = e.key;
+  if (/^[a-zA-Z]$/.test(k) && !e.ctrlKey && !e.metaKey && !e.altKey) { if (cursor) { e.preventDefault(); typeLetter(k.toUpperCase()); } }
+  else if (k === 'Backspace') { e.preventDefault(); backspace(); }
+  else if (k === 'Enter') { e.preventDefault(); humanPlay(); }
+  else if (k === 'Escape') { recall(); cursor = null; render(); }
+  else if (cursor && k.startsWith('Arrow')) {
+    e.preventDefault();
+    const d = {ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1]}[k];
+    cursor.r = Math.max(0, Math.min(N - 1, cursor.r + d[0]));
+    cursor.c = Math.max(0, Math.min(N - 1, cursor.c + d[1]));
+    cursor.dir = d[0] ? 'D' : 'A';
+    render();
+  }
+});
+
+/* ---------- pointer: drag & tap ---------- */
+let drag = null;
+document.addEventListener('pointerdown', e => {
+  if (!canAct() || e.button > 0) return;
+  const el = e.target.closest('.tile.mine');
+  if (!el) return;
+  e.preventDefault();
+  drag = {id: +el.dataset.id, el, sx: e.clientX, sy: e.clientY, moved: false, ghost: null, from: el.closest('#rack') ? 'rack' : 'board'};
+});
+document.addEventListener('pointermove', e => {
+  if (!drag) return;
+  if (!drag.moved) {
+    if (Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) < 6) return;
+    drag.moved = true;
+    const rect = drag.el.getBoundingClientRect();
+    const size = Math.max(rect.width, 44);
+    const g = drag.el.cloneNode(true);
+    g.classList.add('ghost'); g.classList.remove('selected', 'pending');
+    Object.assign(g.style, {width: size + 'px', height: size + 'px', fontSize: size + 'px'});
+    document.body.appendChild(g);
+    drag.ghost = g; drag.size = size;
+    drag.el.classList.add('dragging');
+  }
+  drag.ghost.style.left = (e.clientX - drag.size / 2) + 'px';
+  drag.ghost.style.top = (e.clientY - drag.size / 2) + 'px';
+  document.querySelectorAll('.cell.hover').forEach(c => c.classList.remove('hover'));
+  const t = document.elementFromPoint(e.clientX, e.clientY);
+  const cell = t && t.closest('.cell');
+  if (cell) cell.classList.add('hover');
+});
+function endDrag(e, cancelled) {
+  if (!drag) return;
+  const d = drag; drag = null;
+  if (d.ghost) d.ghost.remove();
+  document.querySelectorAll('.cell.hover').forEach(c => c.classList.remove('hover'));
+  if (cancelled) { render(); return; }
+  if (!d.moved) {
+    if (d.from === 'board') returnToRack(d.id);
+    else selectedId = selectedId === d.id ? null : d.id;
+    render();
+    return;
+  }
+  const t = document.elementFromPoint(e.clientX, e.clientY);
+  const cell = t && t.closest('.cell');
+  const rackEl = t && t.closest('#rack');
+  if (cell) placeTile(d.id, +cell.dataset.r, +cell.dataset.c);
+  else if (rackEl) {
+    const tiles = [...$('rack').querySelectorAll('.tile.mine')].filter(x => +x.dataset.id !== d.id);
+    let idx = tiles.findIndex(x => { const r = x.getBoundingClientRect(); return e.clientX < r.left + r.width / 2; });
+    returnToRack(d.id, idx < 0 ? tiles.length : idx);
+  }
+  render();
+}
+document.addEventListener('pointerup', e => endDrag(e, false));
+document.addEventListener('pointercancel', e => endDrag(e, true));
+
+$('board').addEventListener('click', e => {
+  if (e.target.closest('.tile') || !canAct()) return;
+  const cell = e.target.closest('.cell');
+  if (!cell) return;
+  const r = +cell.dataset.r, c = +cell.dataset.c;
+  if (S.board[r][c] || pendingAt(r, c) != null) return;
+  if (selectedId != null) { placeTile(selectedId, r, c); return; }
+  if (cursor && cursor.r === r && cursor.c === c) cursor.dir = cursor.dir === 'A' ? 'D' : 'A';
+  else cursor = {r, c, dir: 'A'};
+  render();
+});
+
+/* ============================================================
+   Rendering
+   ============================================================ */
+function esc(s) { return String(s).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch])); }
+
+function tileEl(t, extra) {
+  const el = document.createElement('div');
+  const L = letterOf(t);
+  el.className = 'tile' + (t.ch === '?' ? ' blank' : '') + (extra ? ' ' + extra : '');
+  el.dataset.id = t.id;
+  el.innerHTML = `<span class="l">${L || ''}</span><span class="v">${t.ch === '?' ? '' : VAL[t.ch]}</span>`;
+  return el;
+}
+
+function renderBoard() {
+  const b = $('board');
+  const frag = document.createDocumentFragment();
+  const lastSet = new Set(S.last);
+  const pendMap = new Map();
+  if (canAct() || viewer() === cur()) for (const [id, pos] of pending) pendMap.set(pos.r * N + pos.c, id);
+  for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+    const cell = document.createElement('div');
+    cell.dataset.r = r; cell.dataset.c = c;
+    const cellTile = S.board[r][c];
+    const pid = pendMap.get(r * N + c);
+    const pr = PREM[r][c];
+    cell.className = 'cell' + (pr && !cellTile && pid == null ? ' ' + pr : '');
+    if (cellTile) {
+      cell.appendChild(tileEl({id: '', ch: cellTile.blank ? '?' : cellTile.ch, as: cellTile.ch}, lastSet.has(r * N + c) ? 'last' : ''));
+      cell.firstChild.removeAttribute('data-id');
+    } else if (pid != null) {
+      cell.appendChild(tileEl(tileById(pid), 'pending mine'));
+    } else if (r === CENTER && c === CENTER) {
+      cell.classList.add('star');
+    } else if (pr) {
+      cell.textContent = pr;
+    }
+    if (!cellTile && pid == null && cursor && cursor.r === r && cursor.c === c && canAct()) {
+      const k = document.createElement('div'); k.className = 'cursor'; k.textContent = cursor.dir === 'A' ? '▶' : '▼';
+      cell.appendChild(k);
+    }
+    frag.appendChild(cell);
+  }
+  b.replaceChildren(frag);
+}
+
+function renderRack() {
+  const el = $('rack');
+  el.replaceChildren();
+  if (!S || S.over) { el.innerHTML = `<span class="hidden-note">${S && S.placeholder ? 'Start a new game' : 'Game over'}</span>`; return; }
+  const v = viewer();
+  if (!v) { el.innerHTML = `<span class="hidden-note">${awaitingHandoff ? 'Tiles hidden' : esc(cur().name) + ' is playing…'}</span>`; return; }
+  const interactive = canAct() && v === cur();
+  for (const t of v.rack) {
+    if (v === cur() && pending.has(t.id)) continue;
+    el.appendChild(tileEl(t, (interactive ? 'mine' : '') + (t.id === selectedId ? ' selected' : '')));
+  }
+}
+
+function renderSide() {
+  $('players').innerHTML = S.players.map((p, i) => `
+    <div class="pl ${i === S.turn && !S.over ? 'turn' : ''}">
+      <div><div class="nm">${esc(p.name)}</div><div class="sub">${TYPES[p.type]} · ${p.rack.length} tiles</div></div>
+      <div class="sc">${p.score}</div>
+    </div>`).join('');
+  $('bagCount').textContent = S.bag.length;
+  $('log').innerHTML = S.log.length ? S.log.map(m => m.note
+      ? `<div><span>${esc(m.who)} ${esc(m.note)}</span><span></span></div>`
+      : `<div><span>${esc(m.who)}: <span class="w">${esc(m.word)}</span>${m.extra ? ` +${m.extra}` : ''}${m.bingo ? ' ★' : ''}</span><strong>${m.pts}</strong></div>`).join('')
+    : '<div class="empty">No moves yet.</div>';
+}
+
+function renderControls() {
+  const act = canAct();
+  for (const id of ['shuffleBtn', 'recallBtn', 'passBtn', 'playBtn']) $(id).disabled = !act;
+  $('exchangeBtn').disabled = !act || S.bag.length < RACK_SIZE;
+  $('recallBtn').disabled = !act || !pending.size;
+  $('playBtn').disabled = !act || !pending.size;
+  const st = $('status');
+  if (S.placeholder) st.textContent = '';
+  else if (S.over) st.textContent = 'Game over';
+  else if (busy) st.innerHTML = `<span class="think">${esc(cur().name)} is thinking…</span>`;
+  else st.textContent = humans().length === 1 && cur().type === 'human' ? 'Your turn' : `${cur().name}'s turn`;
+}
+
+function renderPreview() {
+  const el = $('preview');
+  if (!canAct() || !pending.size) { el.innerHTML = '&nbsp;'; return; }
+  const res = evalMove(pendingPlaces(), S.board);
+  if (!res.ok) { el.innerHTML = `<span style="color:var(--muted)">${esc(res.err)}</span>`; return; }
+  const bad = res.words.filter(w => !isWord(w.word)).map(w => w.word);
+  if (bad.length) { el.innerHTML = `<span class="bad">Not a word: ${esc(bad.join(', '))}</span>`; return; }
+  el.innerHTML = `<span class="ok">${res.score} points</span> · ${esc(res.words.map(w => w.word).join(', '))}${res.bingo ? ' · <strong>+50 bingo!</strong>' : ''}`;
+}
+
+function render() {
+  if (!S) return;
+  renderBoard(); renderRack(); renderSide(); renderControls(); renderPreview();
+}
+
+/* ============================================================
+   Modals, toast, setup, help
+   ============================================================ */
+function openModal({title, body, buttons = [], solid = false}) {
+  const m = $('modal');
+  m.innerHTML = `<h3>${esc(title)}</h3>`;
+  const b = document.createElement('div');
+  if (typeof body === 'string') b.innerHTML = body; else if (body) b.appendChild(body);
+  m.appendChild(b);
+  if (buttons.length) {
+    const row = document.createElement('div'); row.className = 'mbtns';
+    for (const btn of buttons) {
+      const x = document.createElement('button');
+      x.className = 'btn' + (btn.primary ? ' primary' : '');
+      x.textContent = btn.label; x.onclick = btn.onClick;
+      if (btn.id) x.id = btn.id;
+      row.appendChild(x);
+    }
+    m.appendChild(row);
+  }
+  $('modalBg').classList.toggle('solid', solid);
+  $('modalBg').classList.add('open');
+  modalOpen = true;
+  render();
+}
+function closeModal() { $('modalBg').classList.remove('open'); modalOpen = false; render(); }
+
+let toastTimer;
+function toast(msg) {
+  const t = $('toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 2600);
+}
+
+function showSetup() {
+  const saved = loadSaved();
+  const rows = [{name: 'You', type: 'human'}, {name: 'Computer', type: 'medium'}];
+  const wrap = document.createElement('div');
+
+  const paint = () => {
+    wrap.innerHTML = '';
+    if (dictState === 'loading') wrap.insertAdjacentHTML('beforeend', '<div class="loading">Loading dictionary…</div>');
+    if (dictState === 'failed') wrap.insertAdjacentHTML('beforeend', '<div class="notice">The word list (words.txt) could not load, so words won\'t be checked and computer players are off. This usually happens when opening the file directly; it works once hosted on GitHub Pages or a local server.</div>');
+    wrap.insertAdjacentHTML('beforeend', '<p style="color:var(--muted);font-size:.9rem">Players (2–4)</p>');
+    rows.forEach((row, i) => {
+      const d = document.createElement('div'); d.className = 'prow';
+      const inp = document.createElement('input'); inp.value = row.name; inp.maxLength = 16; inp.oninput = () => row.name = inp.value;
+      const sel = document.createElement('select');
+      for (const k in TYPES) {
+        const o = document.createElement('option'); o.value = k; o.textContent = TYPES[k];
+        if (k !== 'human' && dictState === 'failed') o.disabled = true;
+        sel.appendChild(o);
+      }
+      if (dictState === 'failed' && row.type !== 'human') row.type = 'human';
+      sel.value = row.type;
+      sel.onchange = () => { row.type = sel.value; };
+      const rm = document.createElement('button'); rm.textContent = '×'; rm.title = 'Remove player';
+      rm.disabled = rows.length <= 2; rm.onclick = () => { rows.splice(i, 1); paint(); };
+      d.append(inp, sel, rm); wrap.appendChild(d);
+    });
+    if (rows.length < 4) {
+      const add = document.createElement('button'); add.className = 'btn small'; add.textContent = '+ Add player';
+      add.onclick = () => { rows.push({name: `Player ${rows.length + 1}`, type: 'human'}); paint(); };
+      wrap.appendChild(add);
+    }
+    const startBtn = document.getElementById('startBtn');
+    if (startBtn) startBtn.disabled = dictState === 'loading';
+  };
+  paint();
+  onDictChange = () => { if (modalOpen && wrap.isConnected) paint(); };
+
+  const buttons = [];
+  if (saved) buttons.push({label: 'Resume saved game', onClick: () => {
+    if (dictState === 'loading') return toast('Still loading the dictionary…');
+    S = saved; awaitingHandoff = false; closeModal(); resetTurnUI(); startTurn();
+  }});
+  if (S && !S.over) buttons.push({label: 'Cancel', onClick: closeModal});
+  buttons.push({label: 'Start game', primary: true, id: 'startBtn', onClick: () => {
+    if (dictState === 'loading') return toast('Still loading the dictionary…');
+    const defs = rows.map((r, i) => ({name: (r.name || '').trim() || `Player ${i + 1}`, type: r.type}));
+    closeModal(); newGame(defs);
+  }});
+  openModal({title: 'New game', body: wrap, buttons});
+  $('startBtn').disabled = dictState === 'loading';
+}
+
+function showHelp() {
+  openModal({
+    title: 'How to play',
+    body: `<ul>
+      <li>Build words on the board using the 7 tiles on your rack. Words read left to right or top to bottom.</li>
+      <li>The first word must cover the center star. Every word after that must connect to tiles already on the board.</li>
+      <li>All tiles you place in a turn go in one row or column, and every new word they form must be valid.</li>
+      <li><strong>DL / TL</strong> double or triple a letter. <strong>DW / TW</strong> double or triple the whole word. The star counts as a double word.</li>
+      <li>Use all 7 tiles in one turn for a <strong>50-point bingo</strong>.</li>
+      <li>Blank tiles can be any letter but score 0.</li>
+      <li>Instead of playing, you can exchange tiles (if 7+ remain in the bag) or pass.</li>
+      <li>The game ends when the bag is empty and someone uses their last tile, or after several scoreless turns in a row. Leftover tile values are subtracted, and the player who went out gains them.</li>
+    </ul>
+    <p style="font-size:.85rem;color:var(--muted)">Controls: drag tiles, or tap a tile then a square. Tap a placed tile to take it back. With a keyboard, click a square (click again to switch direction) and type.</p>`,
+    buttons: [{label: 'Got it', primary: true, onClick: closeModal}],
+  });
+}
+
+/* ============================================================
+   Wire up
+   ============================================================ */
+$('playBtn').onclick = humanPlay;
+$('recallBtn').onclick = () => { if (canAct()) recall(); };
+$('shuffleBtn').onclick = () => { if (!canAct()) return; shuffle(cur().rack); selectedId = null; render(); };
+$('passBtn').onclick = humanPass;
+$('exchangeBtn').onclick = humanExchange;
+$('newBtn').onclick = showSetup;
+$('helpBtn').onclick = showHelp;
+$('checker').onsubmit = e => {
+  e.preventDefault();
+  const w = $('checkInput').value.trim().toUpperCase().replace(/[^A-Z]/g, '');
+  const out = $('checkOut');
+  if (!w) { out.textContent = ''; return; }
+  if (dictState !== 'ok') { out.textContent = 'Dictionary not loaded.'; return; }
+  out.innerHTML = isWord(w) ? `<span style="color:var(--good)">✓ ${w} is a valid word</span>` : `<span style="color:var(--bad)">✗ ${w} is not in the dictionary</span>`;
+};
+
+// Initial empty board behind the setup screen
+S = {players: [{name: 'You', type: 'human', score: 0, rack: []}, {name: 'Computer', type: 'medium', score: 0, rack: []}],
+     board: Array.from({length: N}, () => Array(N).fill(null)), bag: [], turn: 0, log: [], scoreless: 0, last: [], over: false};
+S.over = true; S.placeholder = true; // not playable until a game starts
+render();
+showSetup();
+loadDictionary();
+</script>
+</body>
+</html>
