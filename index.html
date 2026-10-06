@@ -221,7 +221,7 @@
       <button class="btn" id="passBtn">Pass</button>
       <button class="btn primary" id="playBtn">Play</button>
     </div>
-    <div class="hint">Drag tiles to the board, or tap a tile then a square. On a keyboard: click a square and type. Enter plays, Esc recalls.</div>
+    <div class="hint">Drag tiles to the board, or tap a tile then a square. Rearrange your rack anytime by dragging tiles or tapping two to swap. On a keyboard: click a square and type. Enter plays, Esc recalls.</div>
   </section>
 
   <aside>
@@ -684,7 +684,10 @@ function viewer() {
   return hs.length === 1 ? hs[0] : null;
 }
 function canAct() { return S && !S.over && !busy && !modalOpen && !awaitingHandoff && cur().type === 'human'; }
-function tileById(id) { return cur().rack.find(t => t.id === id); }
+// Rack arranging is allowed whenever your tiles are on screen, even during the computer's turn
+function canArrange() { return !!(S && !S.over && !modalOpen && viewer()); }
+function rackOwner() { return viewer() || cur(); }
+function tileById(id) { return rackOwner().rack.find(t => t.id === id); }
 function pendingAt(r, c) { for (const [id, pos] of pending) if (pos.r === r && pos.c === c) return id; return null; }
 function pendingPlaces() {
   const out = [];
@@ -708,7 +711,7 @@ function placeTile(id, r, c, letter) {
 }
 
 function returnToRack(id, index) {
-  const p = cur(), t = tileById(id);
+  const p = rackOwner(), t = tileById(id);
   if (!t) return;
   pending.delete(id);
   if (t.ch === '?') t.as = null;
@@ -828,9 +831,10 @@ document.addEventListener('keydown', e => {
 /* ---------- pointer: drag & tap ---------- */
 let drag = null;
 document.addEventListener('pointerdown', e => {
-  if (!canAct() || e.button > 0) return;
+  if (!canArrange() || e.button > 0) return;
   const el = e.target.closest('.tile.mine');
   if (!el) return;
+  if (!canAct() && !el.closest('#rack')) return;
   e.preventDefault();
   drag = {id: +el.dataset.id, el, sx: e.clientX, sy: e.clientY, moved: false, ghost: null, from: el.closest('#rack') ? 'rack' : 'board'};
 });
@@ -853,7 +857,19 @@ document.addEventListener('pointermove', e => {
   document.querySelectorAll('.cell.hover').forEach(c => c.classList.remove('hover'));
   const t = document.elementFromPoint(e.clientX, e.clientY);
   const cell = t && t.closest('.cell');
-  if (cell) cell.classList.add('hover');
+  if (cell && canAct()) cell.classList.add('hover');
+  // Live preview: slide the tile into its new spot while dragging over the rack
+  const rackEl = t && t.closest('#rack');
+  if (rackEl && drag.from === 'rack') {
+    let src = drag.el.isConnected ? drag.el : rackEl.querySelector(`.tile[data-id="${drag.id}"]`);
+    if (src) {
+      src.classList.add('dragging'); drag.el = src;
+      const others = [...rackEl.querySelectorAll('.tile.mine')].filter(x => x !== src);
+      const idx = others.findIndex(x => { const r = x.getBoundingClientRect(); return e.clientX < r.left + r.width / 2; });
+      const before = idx < 0 ? null : others[idx];
+      if (src.nextElementSibling !== before || (before === null && rackEl.lastElementChild !== src)) rackEl.insertBefore(src, before);
+    }
+  }
 });
 function endDrag(e, cancelled) {
   if (!drag) return;
@@ -863,6 +879,12 @@ function endDrag(e, cancelled) {
   if (cancelled) { render(); return; }
   if (!d.moved) {
     if (d.from === 'board') returnToRack(d.id);
+    else if (selectedId != null && selectedId !== d.id && tileById(selectedId) && !pending.has(selectedId)) {
+      // Tap one rack tile, then another, to swap them
+      const rack = rackOwner().rack, a = rack.findIndex(t => t.id === selectedId), b = rack.findIndex(t => t.id === d.id);
+      [rack[a], rack[b]] = [rack[b], rack[a]];
+      selectedId = null;
+    }
     else selectedId = selectedId === d.id ? null : d.id;
     render();
     return;
@@ -870,11 +892,17 @@ function endDrag(e, cancelled) {
   const t = document.elementFromPoint(e.clientX, e.clientY);
   const cell = t && t.closest('.cell');
   const rackEl = t && t.closest('#rack');
-  if (cell) placeTile(d.id, +cell.dataset.r, +cell.dataset.c);
+  if (cell && canAct()) placeTile(d.id, +cell.dataset.r, +cell.dataset.c);
   else if (rackEl) {
-    const tiles = [...$('rack').querySelectorAll('.tile.mine')].filter(x => +x.dataset.id !== d.id);
-    let idx = tiles.findIndex(x => { const r = x.getBoundingClientRect(); return e.clientX < r.left + r.width / 2; });
-    returnToRack(d.id, idx < 0 ? tiles.length : idx);
+    const all = [...$('rack').querySelectorAll('.tile.mine')];
+    let idx;
+    if (d.from === 'rack' && all.some(x => +x.dataset.id === d.id)) idx = all.findIndex(x => +x.dataset.id === d.id);
+    else {
+      const tiles = all.filter(x => +x.dataset.id !== d.id);
+      idx = tiles.findIndex(x => { const r = x.getBoundingClientRect(); return e.clientX < r.left + r.width / 2; });
+      if (idx < 0) idx = tiles.length;
+    }
+    returnToRack(d.id, idx);
   }
   render();
 }
@@ -945,7 +973,7 @@ function renderRack() {
   if (!S || S.over) { el.innerHTML = `<span class="hidden-note">${S && S.placeholder ? 'Start a new game' : 'Game over'}</span>`; return; }
   const v = viewer();
   if (!v) { el.innerHTML = `<span class="hidden-note">${awaitingHandoff ? 'Tiles hidden' : esc(cur().name) + ' is playing…'}</span>`; return; }
-  const interactive = canAct() && v === cur();
+  const interactive = canArrange();
   for (const t of v.rack) {
     if (v === cur() && pending.has(t.id)) continue;
     el.appendChild(tileEl(t, (interactive ? 'mine' : '') + (t.id === selectedId ? ' selected' : '')));
@@ -967,7 +995,8 @@ function renderSide() {
 
 function renderControls() {
   const act = canAct();
-  for (const id of ['shuffleBtn', 'recallBtn', 'passBtn', 'playBtn']) $(id).disabled = !act;
+  for (const id of ['recallBtn', 'passBtn', 'playBtn']) $(id).disabled = !act;
+  $('shuffleBtn').disabled = !canArrange();
   $('exchangeBtn').disabled = !act || S.bag.length < RACK_SIZE;
   $('recallBtn').disabled = !act || !pending.size;
   $('playBtn').disabled = !act || !pending.size;
@@ -1101,7 +1130,7 @@ function showHelp() {
    ============================================================ */
 $('playBtn').onclick = humanPlay;
 $('recallBtn').onclick = () => { if (canAct()) recall(); };
-$('shuffleBtn').onclick = () => { if (!canAct()) return; shuffle(cur().rack); selectedId = null; render(); };
+$('shuffleBtn').onclick = () => { if (!canArrange()) return; const r = rackOwner().rack; const vis = r.filter(t => !pending.has(t.id)); shuffle(vis); let i = 0; for (let k = 0; k < r.length; k++) if (!pending.has(r[k].id)) r[k] = vis[i++]; selectedId = null; render(); };
 $('passBtn').onclick = humanPass;
 $('exchangeBtn').onclick = humanExchange;
 $('newBtn').onclick = showSetup;
