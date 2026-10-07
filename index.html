@@ -109,6 +109,12 @@
   @media (prefers-color-scheme: dark) { .cell.DW { color: #fbe3df; } .cell.DL { color: #e1eefa; } }
   .cell.star::after { content: "★"; font-size: calc(100cqw / 15 * 0.55); color: #6b2a24; }
   .cell.hover { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .cell.hint { box-shadow: inset 0 0 0 3px #f5b400; animation: glow 1.1s ease-in-out infinite; }
+  @keyframes glow { 50% { box-shadow: inset 0 0 0 3px #f5b400, 0 0 12px 2px rgba(245,180,0,.8); } }
+  .hint-msg { text-align: center; margin: 0 auto 8px; max-width: 520px; font-size: .92rem; padding: 8px 12px; border-radius: 8px; background: rgba(245,180,0,.15); border: 1px solid rgba(245,180,0,.5); }
+  .hint-msg:empty { display: none; }
+  .cheat-input { width: 100%; padding: 10px; font: inherit; font-size: 1.4rem; letter-spacing: .3em; text-transform: uppercase; text-align: center; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
+  .log .h { color: var(--muted); font-size: .8rem; }
   .cell .cursor {
     position: absolute; inset: 0; display: grid; place-items: center;
     background: rgba(31,111,92,.25); color: var(--accent); font-size: calc(100cqw / 15 * 0.5);
@@ -212,6 +218,7 @@
   <section class="play">
     <div class="board-wrap"><div class="board" id="board"></div></div>
     <div class="status" id="status"></div>
+    <div class="hint-msg" id="hintMsg"></div>
     <div class="rack-row"><div id="rack"></div></div>
     <div class="preview" id="preview"></div>
     <div class="controls">
@@ -219,6 +226,7 @@
       <button class="btn" id="recallBtn">Recall</button>
       <button class="btn" id="exchangeBtn">Exchange</button>
       <button class="btn" id="passBtn">Pass</button>
+      <button class="btn" id="hintBtn">Hint</button>
       <button class="btn primary" id="playBtn">Play</button>
     </div>
     <div class="hint">Drag tiles to the board, or tap a tile then a square. Rearrange your rack anytime by dragging tiles or tapping two to swap. On a keyboard: click a square and type. Enter plays, Esc recalls.</div>
@@ -348,7 +356,8 @@ function newGame(playerDefs) {
 
 function draw(p) { while (p.rack.length < RACK_SIZE && S.bag.length) p.rack.push(S.bag.pop()); }
 function boardEmpty(b) { for (const row of b) for (const x of row) if (x) return false; return true; }
-function resetTurnUI() { pending.clear(); selectedId = null; cursor = null; typed = []; for (const p of S.players) for (const t of p.rack) if (t.ch === '?') t.as = null; }
+let hint = null, hintUsed = false, codeBuf = '';
+function resetTurnUI() { hint = null; hintUsed = false; pending.clear(); selectedId = null; cursor = null; typed = []; for (const p of S.players) for (const t of p.rack) if (t.ch === '?') t.as = null; }
 
 function saveGame() {
   try {
@@ -617,7 +626,7 @@ function commitPlay(p, places) {
   p.score += res.score;
   draw(p);
   S.scoreless = 0;
-  S.log.unshift({who: p.name, word: res.main, extra: res.words.length - 1, pts: res.score, bingo: res.bingo});
+  S.log.unshift({who: p.name, word: res.main, extra: res.words.length - 1, pts: res.score, bingo: res.bingo, hint: p.type === 'human' && hintUsed});
   if (!p.rack.length && !S.bag.length) return finishGame(p);
   nextTurn();
 }
@@ -814,7 +823,10 @@ document.addEventListener('keydown', e => {
   if (modalOpen || e.target.closest('input, select, textarea')) return;
   if (!canAct()) return;
   const k = e.key;
-  if (/^[a-zA-Z]$/.test(k) && !e.ctrlKey && !e.metaKey && !e.altKey) { if (cursor) { e.preventDefault(); typeLetter(k.toUpperCase()); } }
+  if (/^[a-zA-Z]$/.test(k) && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    if (cursor) { e.preventDefault(); typeLetter(k.toUpperCase()); }
+    else { codeBuf = (codeBuf + k.toUpperCase()).slice(-SECRET.length); if (codeBuf === SECRET) { codeBuf = ''; openCheat(); } }
+  }
   else if (k === 'Backspace') { e.preventDefault(); backspace(); }
   else if (k === 'Enter') { e.preventDefault(); humanPlay(); }
   else if (k === 'Escape') { recall(); cursor = null; render(); }
@@ -921,6 +933,90 @@ $('board').addEventListener('click', e => {
   render();
 });
 
+
+/* ============================================================
+   Hints (step by step) and the secret cheat
+   ============================================================ */
+function hintCells() {
+  const set = new Set();
+  if (!hint || !hint.move || hint.stage === 0 || hint.stage >= 3) return set;
+  const ps = hint.move.places;
+  if (hint.stage === 1) { const f = ps.reduce((a, b) => (b.r * N + b.c < a.r * N + a.c ? b : a)); set.add(f.r * N + f.c); }
+  else for (const p of ps) set.add(p.r * N + p.c);
+  return set;
+}
+
+function nextHint() {
+  if (!canAct()) return;
+  const p = cur();
+  if (!hint || hint.stage >= 3) {
+    const moves = generateMoves(S.board, rackCounts(p.rack));
+    if (!moves.length) {
+      hint = {stage: 3, move: null, msg: S.bag.length >= RACK_SIZE ? 'No plays found with these tiles. Try exchanging some.' : 'No plays found with these tiles. You may need to pass.'};
+      render(); return;
+    }
+    let best = moves[0];
+    for (const m of moves) if (m.score > best.score) best = m;
+    hint = {stage: 0, move: best};
+  }
+  const m = hint.move;
+  hint.stage++;
+  hintUsed = true;
+  const n = m.places.length;
+  const across = n > 1 && m.places.every(x => x.r === m.places[0].r);
+  const dir = n > 1 ? (across ? ', going across' : ', going down') : '';
+  if (hint.stage === 1) {
+    hint.msg = `<strong>Hint:</strong> place ${n} tile${n > 1 ? 's' : ''} to make a ${m.main.length}-letter word worth <strong>${m.score} points</strong>. Your first tile goes on the glowing square${dir}.`;
+  } else if (hint.stage === 2) {
+    hint.msg = `<strong>Hint:</strong> the word is <strong>${esc(m.main)}</strong> (${m.score} points). The glowing squares show where the tiles go.`;
+  } else {
+    recall();
+    const used = new Set();
+    for (const pl of m.places) {
+      const t = p.rack.find(x => !used.has(x.id) && (pl.blank ? x.ch === '?' : x.ch === pl.ch));
+      used.add(t.id);
+      if (pl.blank) t.as = pl.ch;
+      pending.set(t.id, {r: pl.r, c: pl.c});
+    }
+    selectedId = null; cursor = null; typed = [];
+    hint.msg = `<strong>${esc(m.main)}</strong> is on the board. Press <strong>Play</strong> to score it, or Recall to try something else.`;
+  }
+  render();
+}
+
+const SECRET = 'CHEATER';
+function openCheat() {
+  if (!canAct()) return;
+  recall();
+  const p = cur();
+  const wrap = document.createElement('div');
+  wrap.innerHTML = `<p>Type the letters you want on your rack (up to ${p.rack.length}). Use <strong>?</strong> for a blank.</p>`;
+  const inp = document.createElement('input');
+  inp.className = 'cheat-input'; inp.maxLength = p.rack.length; inp.autocomplete = 'off'; inp.spellcheck = false;
+  inp.value = p.rack.map(t => t.ch).join('');
+  wrap.appendChild(inp);
+  const apply = () => {
+    const want = inp.value.toUpperCase().replace(/[^A-Z?]/g, '').slice(0, p.rack.length);
+    if (!want) return toast('Type at least one letter.');
+    closeModal();
+    for (let i = 0; i < want.length; i++) {
+      const t = p.rack[i], L = want[i];
+      if (t.ch === L) continue;
+      const bi = S.bag.findIndex(x => x.ch === L);
+      if (bi >= 0) { const nt = S.bag[bi]; t.as = null; S.bag[bi] = t; p.rack[i] = nt; }
+      else { t.ch = L; t.as = null; }   // none left in the bag: just transform the tile
+    }
+    shuffle(S.bag);
+    hint = null; selectedId = null;
+    saveGame();
+    render();
+    toast('Tiles swapped. Your secret is safe.');
+  };
+  inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); apply(); } });
+  openModal({title: 'Secret tile picker', body: wrap, buttons: [{label: 'Cancel', onClick: closeModal}, {label: 'Swap tiles', primary: true, onClick: apply}]});
+  setTimeout(() => { inp.focus(); inp.select(); }, 30);
+}
+
 /* ============================================================
    Rendering
    ============================================================ */
@@ -939,6 +1035,7 @@ function renderBoard() {
   const b = $('board');
   const frag = document.createDocumentFragment();
   const lastSet = new Set(S.last);
+  const hintSet = hintCells();
   const pendMap = new Map();
   if (canAct() || viewer() === cur()) for (const [id, pos] of pending) pendMap.set(pos.r * N + pos.c, id);
   for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
@@ -947,7 +1044,7 @@ function renderBoard() {
     const cellTile = S.board[r][c];
     const pid = pendMap.get(r * N + c);
     const pr = PREM[r][c];
-    cell.className = 'cell' + (pr && !cellTile && pid == null ? ' ' + pr : '');
+    cell.className = 'cell' + (pr && !cellTile && pid == null ? ' ' + pr : '') + (hintSet.has(r * N + c) && canAct() ? ' hint' : '');
     if (cellTile) {
       cell.appendChild(tileEl({id: '', ch: cellTile.blank ? '?' : cellTile.ch, as: cellTile.ch}, lastSet.has(r * N + c) ? 'last' : ''));
       cell.firstChild.removeAttribute('data-id');
@@ -989,7 +1086,7 @@ function renderSide() {
   $('bagCount').textContent = S.bag.length;
   $('log').innerHTML = S.log.length ? S.log.map(m => m.note
       ? `<div><span>${esc(m.who)} ${esc(m.note)}</span><span></span></div>`
-      : `<div><span>${esc(m.who)}: <span class="w">${esc(m.word)}</span>${m.extra ? ` +${m.extra}` : ''}${m.bingo ? ' ★' : ''}</span><strong>${m.pts}</strong></div>`).join('')
+      : `<div><span>${esc(m.who)}: <span class="w">${esc(m.word)}</span>${m.extra ? ` +${m.extra}` : ''}${m.bingo ? ' ★' : ''}${m.hint ? ' <span class="h">(hint)</span>' : ''}</span><strong>${m.pts}</strong></div>`).join('')
     : '<div class="empty">No moves yet.</div>';
 }
 
@@ -998,6 +1095,9 @@ function renderControls() {
   for (const id of ['recallBtn', 'passBtn', 'playBtn']) $(id).disabled = !act;
   $('shuffleBtn').disabled = !canArrange();
   $('exchangeBtn').disabled = !act || S.bag.length < RACK_SIZE;
+  $('hintBtn').disabled = !act;
+  $('hintBtn').textContent = !hint || hint.stage === 0 ? 'Hint' : hint.stage === 1 ? 'Show word' : hint.stage === 2 ? 'Place it' : 'Hint';
+  $('hintMsg').innerHTML = act && hint && hint.msg ? hint.msg : '';
   $('recallBtn').disabled = !act || !pending.size;
   $('playBtn').disabled = !act || !pending.size;
   const st = $('status');
@@ -1117,6 +1217,7 @@ function showHelp() {
       <li><strong>DL / TL</strong> double or triple a letter. <strong>DW / TW</strong> double or triple the whole word. The star counts as a double word.</li>
       <li>Use all 7 tiles in one turn for a <strong>50-point bingo</strong>.</li>
       <li>Blank tiles can be any letter but score 0.</li>
+      <li>Stuck? Tap <strong>Hint</strong>. The first tap shows where a good word goes, the second reveals the word, and the third places it for you.</li>
       <li>Instead of playing, you can exchange tiles (if 7+ remain in the bag) or pass.</li>
       <li>The game ends when the bag is empty and someone uses their last tile, or after several scoreless turns in a row. Leftover tile values are subtracted, and the player who went out gains them.</li>
     </ul>
@@ -1129,9 +1230,10 @@ function showHelp() {
    Wire up
    ============================================================ */
 $('playBtn').onclick = humanPlay;
-$('recallBtn').onclick = () => { if (canAct()) recall(); };
+$('recallBtn').onclick = () => { if (!canAct()) return; if (hint && hint.stage >= 3) hint = null; recall(); };
 $('shuffleBtn').onclick = () => { if (!canArrange()) return; const r = rackOwner().rack; const vis = r.filter(t => !pending.has(t.id)); shuffle(vis); let i = 0; for (let k = 0; k < r.length; k++) if (!pending.has(r[k].id)) r[k] = vis[i++]; selectedId = null; render(); };
 $('passBtn').onclick = humanPass;
+$('hintBtn').onclick = nextHint;
 $('exchangeBtn').onclick = humanExchange;
 $('newBtn').onclick = showSetup;
 $('helpBtn').onclick = showHelp;
